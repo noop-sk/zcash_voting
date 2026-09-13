@@ -6,6 +6,20 @@ and this workspace adheres to [Semantic Versioning](https://semver.org/spec/v2.0
 
 ## Unreleased
 
+## v4.0.0-rc.1
+
+### Changed
+
+- Updated the LRZ release stack to `voting-crypto-deps 0.2.3`,
+  `voting-circuits 0.12.0`, and `imt-tree 0.5.3`.
+- Added the explicit `lrz` feature required by downstream consumers that
+  disable default features.
+- Prepared `vote-commitment-tree 0.6.1` and
+  `vote-commitment-tree-client 0.8.1` with the compatible dependency pins;
+  publish them in that order before `zcash_voting 4.0.0-rc.1`.
+- Raised the minimum supported Rust version from 1.88 to 1.91, as required by
+  `imt-tree 0.5.3`.
+
 ## v4.0.0-rc.0
 
 ### Fixed

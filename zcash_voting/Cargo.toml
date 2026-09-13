@@ -1,14 +1,20 @@
 [package]
 name = "zcash_voting"
-version = "4.0.0-rc.0"
+version = "4.0.0-rc.1"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.91"
 description = "Client-side library for Zcash shielded voting: ZKP delegation and vote-commitment proofs (Halo 2), ElGamal encryption, governance PCZT construction, Merkle witness generation, and SQLite round-state persistence."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/valargroup/zcash_voting"
 readme = "README.md"
 
 [features]
+default = ["lrz"]
+lrz = [
+    "voting-circuits/lrz",
+    "vote-commitment-tree/lrz",
+    "vote-commitment-tree-client/lrz",
+]
 test-fixtures = []
 
 [dependencies]
@@ -43,7 +49,7 @@ pir-client = { version = "=0.4.0", default-features = false }
 pir-types = { version = "=0.3.0", default-features = false }
 valar-spiral-rs = { version = "=0.5.2", default-features = false }
 valar-ypir = { version = "=0.2.0", default-features = false }
-imt-tree = { version = "=0.2.1" }
+imt-tree = { version = "=0.5.3", default-features = false, features = ["upstream"] }
 
 bytes = { version = "1" }
 http = { version = "1" }
@@ -55,8 +61,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 tonic = { version = "0.14", features = ["channel", "tls-webpki-roots", "tls-ring"] }
 
-vote-commitment-tree = { path = "../vote-commitment-tree", version = "=0.5.0" }
-vote-commitment-tree-client = { path = "../vote-commitment-tree-client", version = "=0.7.0", features = ["http"] }
+vote-commitment-tree = { path = "../vote-commitment-tree", version = "=0.6.1", default-features = false }
+vote-commitment-tree-client = { path = "../vote-commitment-tree-client", version = "=0.8.1", default-features = false, features = ["http"] }
 
 # Storage
 rusqlite = { version = "0.37", features = ["bundled"] }

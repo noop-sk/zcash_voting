@@ -249,18 +249,20 @@ The crate no longer accepts root wallet seed material for delegation signing.
 
 ## Dependency notes
 
-`zcash_voting` uses the upstream Ironwood dependency stack selected by the
-workspace root. `Cargo.toml` is the source of truth for version and
-feature requirements, and `Cargo.lock` records the exact package sources and
-versions used by this branch.
-This release line requires Rust 1.88 or newer.
+`zcash_voting` uses the upstream Ironwood dependency stack selected by its
+default `lrz` feature. Downstream consumers that disable default features can
+select the same stack explicitly with `features = ["lrz"]`. `Cargo.toml` is the
+source of truth for version and feature requirements, and `Cargo.lock` records
+the exact package sources and versions used by this branch. This release line
+requires Rust 1.91 or newer.
 
 - **`orchard 0.15`** from [zcash/orchard](https://github.com/zcash/orchard),
   with `unstable-voting-circuits` enabled for the governance proof paths.
-- **`voting-circuits 0.10.0-rc.1`** from [valargroup/voting-circuits](https://github.com/valargroup/voting-circuits)
-  for the delegation and vote proof circuits.
-- **`vote-commitment-tree 0.5.0-rc.1`** and
-  **`vote-commitment-tree-client 0.7.0-rc.1`** for vote commitment tree state
+- **`voting-crypto-deps 0.2.3`** and **`voting-circuits 0.12.0`** from
+  [valargroup/voting-circuits](https://github.com/valargroup/voting-circuits)
+  for shared LRZ cryptography types and the delegation and vote proof circuits.
+- **`vote-commitment-tree 0.6.1`** and
+  **`vote-commitment-tree-client 0.8.1`** for vote commitment tree state
   and optional HTTP sync.
 - **`pczt 0.9.2`, `zcash_client_backend 0.24.0-rc.7`,
   `zcash_client_sqlite 0.22.0-rc.7`, `zcash_keys 0.16.1`,
