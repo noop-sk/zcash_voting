@@ -121,7 +121,7 @@ Pre-launch wallet databases with older schema versions are reset when opened by
 this branch; callers that need to preserve test data should export it before
 upgrading the crate.
 
-The workspace uses the published `voting-circuits 0.10.0-rc.1` release.
+The workspace uses the published `voting-circuits 0.12.0` release.
 
 ## Dependency Strategy
 
@@ -134,13 +134,17 @@ workspace member:
   `zcash_client_sqlite 0.22.0-rc.7`, `zcash_keys 0.16.1`,
   `zcash_primitives 0.30.0`, and `zcash_protocol 0.10.4`** from published
   librustzcash releases.
-- **`voting-circuits 0.10.0-rc.1`** from
+- **`voting-crypto-deps 0.2.3`** and **`voting-circuits 0.12.0`** from
   [valargroup/voting-circuits](https://github.com/valargroup/voting-circuits)
-  for the delegation and vote proof circuits.
+  for the shared LRZ cryptography types and the delegation and vote proof
+  circuits.
+- **`vote-commitment-tree 0.6.1`** and
+  **`vote-commitment-tree-client 0.8.1`** for vote commitment tree state and
+  optional HTTP sync.
 
 `Cargo.toml` is the source of truth for version and feature requirements, and
 `Cargo.lock` records the exact package sources and versions used by this branch.
-The Zcash wallet crates require Rust 1.88 or newer.
+The Zcash wallet crates require Rust 1.91 or newer.
 
 ## FFI
 

@@ -4,10 +4,9 @@
 
 use core::iter;
 
-use ff::PrimeField;
 use incrementalmerkletree::{Hashable, Level};
 use lazy_static::lazy_static;
-use pasta_curves::Fp;
+use voting_crypto_deps::pasta_curves::{group::ff::PrimeField, Fp};
 
 use crate::poseidon_hash;
 
@@ -19,6 +18,11 @@ use crate::poseidon_hash;
 /// round — well within 2^24. This saves 8 Poseidon hashes per ZKP proof
 /// (~2,000 fewer constraints) and shrinks Merkle paths from 1,028 to 772 bytes.
 pub const TREE_DEPTH: usize = 24;
+
+/// Number of leaves addressable by the Vote Commitment Tree.
+///
+/// Valid zero-based leaf positions are strictly less than this capacity.
+pub const TREE_CAPACITY: u64 = 1 << TREE_DEPTH;
 
 /// Shard height for the underlying `ShardTree` (each shard covers 2^4 = 16 leaves).
 pub(crate) const SHARD_HEIGHT: u8 = 4;
