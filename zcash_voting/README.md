@@ -4,86 +4,45 @@ Client-side library for integrating [Zcash shielded voting](https://github.com/v
 
 ## Usage
 
-Wallets should import `zcash_voting::prelude::*` and follow the stable setup →
-precompute → delegate → vote → share lifecycle:
+**Upgrading from v3.x or v4.0.x?** Read
+[Migrating to v5](../docs/migrating-to-v5.md) for release-specific prerequisites,
+API replacements, examples, and database compatibility limits. The
+[v5 release notes](../CHANGELOG.md#v500) summarize the final released behavior.
 
-1. Open a `VotingDb`, set the wallet id, and call `create_round` with the
-   wallet/voting `Network` (pass `None` when no round session metadata is
-   available).
-2. Convert eligible shielded notes into `NoteInfo` with
-   `NoteInfo::from_orchard_note`, then call `ensure_bundles`. Snapshot
-   selection is Ironwood / NU6.3-only and rejects non-NU6.3 snapshots.
-   The default `BundlePolicy` fills each bundle up to the circuit note-slot
-   count. Wallets that need fewer real notes per bundle can call the
-   `*_with_policy` variants with `BundlePolicy::new(...)`; proof construction
-   still pads each bundle to the same fixed circuit slot count.
-   Use `recoverable_bundle_policy_v1()` when the wallet must reconstruct the
-   same bundle identities after losing its voting database. The frozen policy
-   includes the 25,000 ZEC addition threshold used for the canonical ZIP-318
-   note shape.
-3. Build the governance PCZT with `setup_delegation`.
-4. Precompute delegation inputs with `note_witnesses` and `delegation_pir`.
-5. After `delegate::setup`, load `delegation_signing_request` and sign it in
-   the wallet. Then prove with `PreparedDelegationBundle::ensure_proof` and
-   drive the transaction with
-   `ChainSubmissionClient::advance_delegation_with_recovery`, passing
-   `ChainRecoveryMode::ExactTree` and only the resulting SpendAuth signature in
-   `AdvanceDelegation`. The SDK loads the authoritative sighash and randomized
-   verification key, builds the request, dispatches it once, polls it, and
-   writes the confirmed VAN position atomically. Call again while the result is
-   `Pending`. Proof production is process-local single-flight per
-   wallet/round/bundle: overlapping foreground and background callers reuse one
-   durable proof, while different bundles remain eligible for parallel work.
-6. Record each terminal ballot decision with `set_ballot_intent`, passing the
-   proposal's declared option count so choices are validated before persistence.
-   For multiple answered proposals in one bundle, call
-   `vote::commit_atomic_vote_batch` once with their canonical order. Every
-   action signs the same batch digest, so the chain either accepts the complete
-   authority chain or none of it. Pass that canonical roster to
-   `ChainSubmissionClient::advance_vote_batch_with_recovery` with
-   `ChainRecoveryMode::ExactTree`; the lifecycle constructs and dispatches the
-   request and confirms every
-   member atomically, then submit each vote's helper shares. `vote::commit` and the existing `vote::commit_batch` retain
-   singleton behavior; the batch-named compatibility API accepts one draft.
-   Recover and confirm existing work
-   before preparing another vote chain for the same bundle. While polling an
-   atomic batch, helper-share recovery remains deferred for every member until
-   batch confirmation records all vote commitment positions.
-7. After restart, call `resume_plan` with the round's full proposal id list and
-   execute one returned `NextStep`, persist its result, then call `resume_plan`
-   again. `CastVote` includes the recorded choice. Execute `AdvanceDelegation`,
-   `AdvanceVote`, and `AdvanceVoteBatch` through their matching
-   `*_with_recovery` methods with `ChainRecoveryMode::ExactTree`;
-   `AdvanceVoteBatch` carries the first ordered proposal as a recovery anchor.
-   Steps derive from the
-   authoritative `chain_submissions` row, so an in-flight generation yields an
-   advance step rather than a second submission. Prefer the plan's derived
-   booleans over matching step kinds; they are computed from an exhaustive
-   match so a new kind cannot silently read as "no work". After confirmation,
-   call
-   `vote::CommittedVote::recover` for each vote. Probe the configured fleet with
-   `HelperClient::preflight_fleet`, then call
-   `CommittedVote::prepare_share_delivery` with the complete proposal id roster
-   from the authenticated round configuration. The SDK owns entropy, requires
-   matching terminal ballot intents, derives the round's single immediate
-   share and readiness target, plans every committed share, validates the
-   aggregate quota, and atomically persists the complete generation-bound plan
-   before any POST. Planning may occur before confirmation; the confirmation transaction
-   advances an exactly matching plan snapshot when it fills the VC tree
-   position. The same call after restart returns that stored plan. Once the
-   vote is confirmed, recover a fresh `CommittedVote`, convert it with
-   `CommittedVote::confirmed`, and call `ConfirmedVote::submit_prepared_shares`
-   with the complete current configured fleet. The SDK validates the plan and every payload before network I/O,
-   enforces the process-wide 128-POST ceiling, reconstructs each wire payload
-   with the durable confirmed VC position, and journals every attempt before
-   dispatch. Removed targets and target-count drift fail instead of being
-   remapped or replanned.
-   `track_pending_shares`
-   polls the complete current fleet and requires two distinct confirmations
-   when at least two helpers are configured; a one-helper fleet uses its only
-   available confirmation. The result is persisted internally.
-   `Decision::Skipped` is terminal, so `open_proposals`
-   contains only proposals that have no recorded decision.
+Import `zcash_voting::prelude::*` and use the SDK-owned lifecycle:
+
+1. Open a wallet-scoped sidecar with `VotingDb::open_wallet_sidecar` and persist
+   bundle setup through `DelegationPipeline::setup_bundles` or the round APIs.
+   Snapshot selection is Ironwood / NU6.3-only. Bundle policy is persisted per
+   round; its default includes privacy trimming. Use
+   `recoverable_bundle_policy_v1()` when reproducible bundle reconstruction is
+   required, and preserve the existing sidecar and voting hotkey secret.
+2. Bind a `RoundExecutor` to the round, network, authenticated proposal roster,
+   and voting hotkey. Record each choice or explicit skip with
+   `set_ballot_intents`, including the expected network and option counts.
+3. Supply current service configuration, timing, and signing inputs through a
+   `RoundHostSource`, then call `RoundDriver::run`. Inspect its report and stop
+   reason to handle missing ballot decisions, bundle setup, signatures,
+   failures, or background share work. Software signing stays at the wallet
+   boundary; Keystone signatures are persisted for restart.
+4. Restore pending shares with `share::pending_rounds_for_accounts` and run
+   `ShareTrackingDriver` in the background. It owns polling and recovery cadence
+   through vote end. Default foreground execution confirms only the designated
+   immediate share, not every share in the round.
+
+Fresh local delegation and choices use `delegate-and-cast-vote-batch` together.
+Existing delegations use `cast-vote-batch` for multiple due proposals and
+`cast-vote` for a singleton. The chain must support these routes. Imported
+capability delegations remain signer-free and poll-only until confirmed.
+
+For specialized manual delivery, use `CommittedVote::prepare_share_delivery`
+with the complete authenticated roster, then recover a fresh committed handle
+after confirmation and convert it with `CommittedVote::confirmed`. Only
+`ConfirmedVote::submit_prepared_shares` submits the prepared plan. Pass the
+complete current helper fleet and preserve the stored plan across restart.
+The SDK owns entropy, placement, payload construction, and attempt journaling.
+Helper confirmation requires two distinct helpers when at least two are
+configured, or the only helper for a one-helper fleet.
 
 ## Crate layout
 
@@ -100,10 +59,13 @@ precompute → delegate → vote → share lifecycle:
 | `prelude` | Recommended imports for wallet SDKs. |
 | `round` | `VotingDb`, `RoundParams`, `RoundInfo`, idempotent `ensure_bundles`, and policy-aware bundle planning. |
 | `precompute` | Shielded note witness generation and PIR precompute wrappers. |
-| `delegate` | PCZT setup, proof generation, submission assembly, and chain recovery writes. |
-| `confirmation` | Chain tx event parsing plus atomic delegation, singleton-vote, and vote-batch confirmation recording. |
+| `delegate` | PCZT setup, coordinated proof generation, signing requests, and capability-export assembly. |
+| `chain_submission` | Durable chain dispatch, polling, exact-tree recovery, and atomic confirmation. |
+| `round_drive` / `vote_work` | Round driver, bound executor, host inputs, and progress reports. |
+| `delegation_pipeline` | Reusable wallet-bound setup, eligibility, proving, and external signing. |
+| `share_tracking_drive` | Background helper confirmation and recovery loop. |
 | `vote` | ZKP2 construction, bounded parallel batch proving, cast-vote signing, and atomic recovery-bundle persistence. |
-| `share` | Helper-share payload recovery, nullifier computation, and share confirmation state. |
+| `share` | Helper-share state, policy, and account-scoped pending-round queries. |
 | `session` | Durable ballot intent plus the round-level resume planner. |
 | `phases` | Per-bundle `DelegationPhase` derived from persisted artifacts. |
 | `config` | Static and dynamic voting config validation, signature checks, and switch decisions. |
@@ -116,6 +78,9 @@ storage rows directly. An atomic batch preserves the original proof's
 privacy for choices, notes, amounts, and voting keys. Its deliberate metadata
 tradeoff is transaction-level linkage: observers can see that the ordered
 proposal actions in the batch were submitted together.
+
+API workflow calls support [optional observability](../docs/observability.md),
+including per-bundle proof and submission timings and diagnostics on errors.
 
 ## Config resolution
 
@@ -366,12 +331,13 @@ that should stay consistent across SDKs:
   retries outcome-unknown helpers before falling back to already-sent helpers
 - share tracking summaries, readiness checks, retry thresholds, and polling delay
 
-Wallet SDKs should provide fresh CSPRNG bytes from their platform RNG and let the
-crate own the sampling and ordering policy.
+The SDK-owned delivery workflow supplies entropy and applies these policies.
+Hosts supply authenticated timing and the complete helper fleet; use
+`ShareTrackingDriver` for pass scheduling.
 
 ## Secret boundaries
 
-Wallet seed material should stay in the wallet integration. For v2 integrations,
+Wallet seed material should stay in the wallet integration. For v5 integrations,
 generate a random app-owned voting hotkey with `generate_random_voting_hotkey`,
 store `VotingHotkey::stored_secret()` in platform secure storage, and
 reconstruct a typed hotkey with `VotingHotkey::from_stored_secret` when needed.
@@ -391,7 +357,8 @@ Delegation signing follows the same boundary. After `setup_delegation`, call
 `delegation_signing_request` to load the account index, network, seed
 fingerprint, PCZT sighash, and spend auth randomizer. Software wallets should
 derive the account SpendAuth key locally, randomize it with `alpha`, and sign
-the sighash. Pass only the resulting signature to
+the sighash through the pipeline's `SpendAuthSigner` callback. For manual
+standalone delegation advancement, pass only the resulting signature to
 `ChainSubmissionClient::advance_delegation_with_recovery` with
 `ChainRecoveryMode::ExactTree`; the client reloads the authoritative sighash
 and randomized verification key from the locked bundle.
@@ -399,6 +366,21 @@ The crate no longer accepts root wallet seed material for delegation signing.
 An imported capability delegation instead uses
 `ChainSubmissionClient::advance_imported_delegation`: it adopts the package's
 stored transaction hash and only polls it, without a signer or POST.
+
+### Keystone proof warmup
+
+`DelegationPipeline::ensure_proof` can warm a Keystone bundle before the device
+signs. The SDK stores the exact finalized PCZT with its signing context;
+`DelegationPipeline::keystone_request` reloads it after warmup or a process
+restart. Concurrent request creation and proof setup converge on one durable
+transaction. Proof generation retains its existing single-flight coordination.
+The host owns scheduling, cancellation, hotkey custody, and device signing.
+
+Schema 22 adds nullable PCZT storage and preserves existing rounds. A legacy
+bundle whose original PCZT is unavailable returns
+`DelegationPcztUnavailable` when asked for a Keystone request. Do not
+reset or rebuild such a bundle automatically. Existing validated software
+proof reuse and authoritative chain submissions do not require PCZT bytes.
 
 ## Dependency notes
 
@@ -412,7 +394,7 @@ capability selectors, those features never weak-reference both optional
 backend families. External-consumer regression tests verify that selecting
 `zcash_voting/lrz` puts no Zakura forks in Cargo lockfiles or resolved
 metadata. The selected wallet facade release is `zakura-wallet-lib
-0.1.0-rc4`.
+0.1.0-rc5`.
 
 `Cargo.toml` is the source of truth for version and feature requirements, and
 `Cargo.lock` records the exact package sources and versions used by this branch.
@@ -420,16 +402,16 @@ This release line requires Rust 1.91 or newer.
 
 - **`orchard 0.15`** from [zcash/orchard](https://github.com/zcash/orchard),
   with `unstable-voting-circuits` enabled for the governance proof paths
-  (or `zakura-orchard 1.0.0` with the `zakura` feature).
-- **`voting-circuits 0.12.0-rc.1`** from [valargroup/voting-circuits](https://github.com/valargroup/voting-circuits)
+  (or `zakura-orchard 1.2.0` with the `zakura` feature).
+- **`voting-circuits 0.12.1`** from [valargroup/voting-circuits](https://github.com/valargroup/voting-circuits)
   for the delegation and vote proof circuits.
-- **`vote-commitment-tree 0.6.0`** and
-  **`vote-commitment-tree-client 0.8.0`** for vote commitment tree state
-  and optional HTTP sync.
-- **`pczt 0.9.2`, `zcash_client_backend 0.24.0-rc.7`,
-  `zcash_client_sqlite 0.22.0-rc.7`, `zcash_keys 0.16.1`,
-  `zcash_primitives 0.30.0`, and `zcash_protocol 0.10.4`** from published
-  librustzcash releases (or the stable `zakura-*` family and RC4 wallet crates in
+- **`vote-commitment-tree 0.6.1`** and
+  **`vote-commitment-tree-client 0.8.1`** for vote commitment tree state
+  and HTTP sync.
+- **`pczt 0.9.3`, `zcash_client_backend 0.24.0`,
+  `zcash_client_sqlite 0.22.0`, `zcash_keys 0.16.1`,
+  `zcash_primitives 0.30.1`, and `zcash_protocol 0.10.5`** from published
+  librustzcash releases (or the stable `zakura-*` family and RC5 wallet crates in
   `zakura` builds).
 
 ## Downstream test fixtures
@@ -448,73 +430,6 @@ tests can exercise the public submission and confirmation APIs. Only pass
 trusted fixture data. Cargo features are additive and are not a security
 boundary, so production builds should not enable this feature.
 
-## Migrating from 0.10
-
-- PIR and tree-sync APIs are now always compiled; no feature flags are required.
-- Prefer `VotingDb::create_round`, `VotingDb::ensure_bundles`, and
-  `VotingDb::delegation_phases` over direct `storage::queries` calls. Pass the
-  round's wallet/voting `Network` when creating or ensuring a round.
-- Use `BundlePolicy` plus the `*_with_policy` APIs when an integration needs
-  fewer real notes per bundle. Omit the policy for the default circuit-slot
-  behavior.
-- Use `precompute::note_witnesses` instead of hand-validating cached
-  `TreeState` bytes and manually constructing `WitnessData`.
-- Pass the externally produced SpendAuth signature in `AdvanceDelegation` to
-  `ChainSubmissionClient::advance_delegation_with_recovery` with
-  `ChainRecoveryMode::ExactTree` after signing
-  `delegation_signing_request` in the wallet. The client loads the signed
-  sighash from durable bundle state instead of accepting it from the host.
-  `PreparedDelegationBundle::signed_bundle` still assembles a
-  `SignedDelegationBundle` for the capability-handoff export flow.
-- Use `generate_random_voting_hotkey` to create app-owned voting hotkeys for
-  both software and hardware wallets, persist `VotingHotkey::stored_secret()`,
-  and use `VotingHotkey::from_stored_secret` to reconstruct the same hotkey
-  later. The crate no longer derives voting hotkeys from root wallet seeds.
-- Use the `ChainSubmissionClient` advancement methods for every chain
-  transaction. Plain local `advance_*` methods are status-only; execute local
-  `resume_plan` advance steps through the matching `*_with_recovery` method
-  with `ChainRecoveryMode::ExactTree`. Imported delegation advancement remains
-  poll-only. The SDK owns endpoint
-  construction, encoding, timeouts, retry eligibility, event parsing, polling,
-  exact commitment-tree recovery, and atomic confirmation of tx hashes, VAN
-  positions, and VC positions; hosts supply a `ChainTransport`, scheduling, and
-  cancellation. The version-17 APIs that let callers record a transaction hash,
-  record a VAN or VC position, or apply their own parsed chain events have been
-  removed, and `chain_submission` carries compile-time checks that keep them
-  removed.
-- Use `session::resume_plan` instead of reconstructing what comes next from raw
-  delegation, vote, and share phases in wallet code. Fetch step execution
-  material through crate APIs such as `vote::CommittedVote::recover` and
-  `share::*`, and drive chain work with `ChainSubmissionClient`.
-- Use `vote::commit` for one singleton. The existing `vote::commit_batch`
-  remains as a one-draft compatibility wrapper for singleton submission, while
-  `vote::commit_atomic_vote_batch` builds one atomic, canonical multi-question
-  transaction. Use `vote::CommittedVote::recover` to reload a committed vote and
-  `ChainSubmissionClient::advance_vote_with_recovery` with
-  `ChainRecoveryMode::ExactTree` for the resumable cast-vote chain lifecycle.
-  Wallets should not write recovery JSON, submission flags, or vote commitment
-  positions directly.
-- Pre-launch database migrations reset older schema versions; export local test
-  state before opening an older wallet DB with this crate version.
-
 ## License
 
 Dual-licensed under MIT or Apache-2.0. See [LICENSE-MIT](../LICENSE-MIT) and [LICENSE-APACHE](../LICENSE-APACHE).
-
-API workflow calls support [optional observability](../docs/observability.md),
-including per-bundle proof and submission timings and diagnostics on errors.
-
-### Keystone proof warmup
-
-`DelegationPipeline::ensure_proof` can warm a Keystone bundle before the device
-signs. The SDK stores the exact finalized PCZT with its signing context;
-`DelegationPipeline::keystone_request` reloads it after warmup or a process
-restart. Concurrent request creation and proof setup converge on one durable
-transaction. Proof generation retains its existing single-flight coordination.
-The host owns scheduling, cancellation, hotkey custody, and device signing.
-
-Schema 22 adds nullable PCZT storage and preserves existing rounds. A legacy
-bundle whose original PCZT is unavailable returns
-`DelegationPcztUnavailable` when asked for a Keystone request. Do not
-reset or rebuild such a bundle automatically. Existing validated software
-proof reuse and authoritative chain submissions do not require PCZT bytes.
