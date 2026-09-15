@@ -6,6 +6,11 @@ and this workspace adheres to [Semantic Versioning](https://semver.org/spec/v2.0
 
 ## Unreleased
 
+### Fixed
+
+- Reject over-capacity leaves and non-increasing checkpoints from vote-tree
+  endpoints with typed sync errors instead of panicking the wallet.
+
 ## v5.0.1
 
 `zcash_voting` 5.0.1 supersedes 5.0.0 for wallet integrations. Version 5.0.0
