@@ -1,9 +1,13 @@
 # Migrating to zcash_voting v5
 
 This guide covers **v3.x → v5.0.x** and **v4.0.x → v5.0.x**, using
-`v5.0.0` as the destination. Read it alongside the
-[v5 release notes](../CHANGELOG.md#v500). Later v5.0.x patch releases should
-be read for any additional fixes or compatibility notes.
+`v5.0.1` as the destination. Read it alongside the
+[v5 release notes](../CHANGELOG.md#v501).
+
+Do not target v5.0.0 for a new integration. It rejects an authenticated
+vote-chain configuration containing more than eight endpoints before making a
+network request. V5.0.1 accepts the complete configuration, up to 100
+endpoints, while retaining the separate limit of eight submission attempts.
 
 The main change is ownership of the voting workflow. The wallet supplies user
 intent, signing, authenticated configuration, transport, and app lifecycle
@@ -85,7 +89,7 @@ prereleases. PIR and tree sync are always available; they are not optional
 network feature flags. Use `zcash_voting::backend` re-exports where appropriate
 so notes, keys, and PCZT types come from the selected crypto family.
 
-V5.0.0 pins `voting-crypto-deps 0.2.3`, `voting-circuits 0.12.1`,
+V5.0.x pins `voting-crypto-deps 0.2.3`, `voting-circuits 0.12.1`,
 `imt-tree 0.5.3`, `pir-types 0.6.3`, `pir-client 0.7.3`,
 `vote-commitment-tree 0.6.1`, `vote-commitment-tree-client 0.8.1`, and
 `zakura-wallet-lib 0.1.0-rc5`. Align any direct dependencies that exchange

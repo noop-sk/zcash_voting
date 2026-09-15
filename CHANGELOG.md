@@ -6,11 +6,21 @@ and this workspace adheres to [Semantic Versioning](https://semver.org/spec/v2.0
 
 ## Unreleased
 
+## v5.0.1
+
+`zcash_voting` 5.0.1 supersedes 5.0.0 for wallet integrations. Version 5.0.0
+rejects an authenticated vote-chain configuration containing more than eight
+endpoints before making a network request.
+
 ### Fixed
 
-- Allow chain submission clients to configure up to 100 vote-chain endpoints.
+- Allow chain submission clients to configure up to 100 vote-chain endpoints,
+  while retaining the separate limit of eight submission attempts.
 
 ## v5.0.0
+
+> **Known issue:** Version 5.0.0 rejects vote-chain configurations containing
+> more than eight endpoints. Use 5.0.1 instead.
 
 `zcash_voting` 5.0.0 moves round execution, chain submission/recovery, and
 helper-share tracking into the SDK. Wallet integrations must adapt their
