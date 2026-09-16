@@ -2139,13 +2139,25 @@ pub fn store_vote(
         .unwrap()
         .as_secs() as i64;
 
-    conn.execute_batch("SAVEPOINT store_vote_replace")
-        .map_err(|e| VotingError::Internal {
-            message: format!("failed to start store vote savepoint: {}", e),
-        })?;
+    // Reserve the WAL writer before the validation read below, the same way
+    // every other write path in this module does (see e.g.
+    // replace_bundle_witnesses and delete_bundles_from). A plain SAVEPOINT
+    // here would start a deferred transaction: the SELECT that follows would
+    // only take a SHARED lock, and the INSERT after it would then need to
+    // upgrade that SHARED lock to a write lock from inside an already-open
+    // transaction. SQLite does not invoke the busy handler for that upgrade
+    // (deadlock avoidance), so a concurrent writer made this fail instantly
+    // with SQLITE_BUSY regardless of any configured busy_timeout. Taking the
+    // write lock immediately, before the read, means a concurrent writer is
+    // waited out through the normal busy handler instead.
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate).map_err(|e| {
+        VotingError::Internal {
+            message: format!("failed to start store vote transaction: {}", e),
+        }
+    })?;
 
     let result: Result<(), VotingError> = (|| {
-        let existing_vote: Option<(i64, Option<Vec<u8>>, bool)> = conn
+        let existing_vote: Option<(i64, Option<Vec<u8>>, bool)> = tx
             .query_row(
                 "SELECT choice, commitment, tx_hash IS NOT NULL FROM votes
                  WHERE round_id = :round_id
@@ -2185,7 +2197,7 @@ pub fn store_vote(
             return Ok(());
         }
 
-        conn.execute(
+        tx.execute(
             "INSERT OR REPLACE INTO votes (round_id, wallet_id, bundle_index, proposal_id, choice, commitment, created_at)
              VALUES (:round_id, :wallet_id, :bundle_index, :proposal_id, :choice, :commitment, :created_at)",
             named_params! {
@@ -2203,7 +2215,7 @@ pub fn store_vote(
         })?;
 
         if vote_changed {
-            conn.execute(
+            tx.execute(
                 "DELETE FROM share_delegations
                  WHERE round_id = :round_id
                    AND wallet_id = :wallet_id
@@ -2225,15 +2237,12 @@ pub fn store_vote(
     })();
 
     match result {
-        Ok(()) => conn
-            .execute_batch("RELEASE SAVEPOINT store_vote_replace")
-            .map_err(|e| VotingError::Internal {
-                message: format!("failed to commit store vote savepoint: {}", e),
-            }),
+        Ok(()) => tx.commit().map_err(|e| VotingError::Internal {
+            message: format!("failed to commit store vote transaction: {}", e),
+        }),
         Err(err) => {
-            let _ = conn.execute_batch(
-                "ROLLBACK TO SAVEPOINT store_vote_replace; RELEASE SAVEPOINT store_vote_replace",
-            );
+            // `Transaction`'s `Drop` impl rolls back automatically when it is
+            // dropped without a commit.
             Err(err)
         }
     }
